@@ -1,7 +1,14 @@
 using DevHabit.Api.Database;
+using DevHabit.Api.DTOs.Habits;
+using DevHabit.Api.Entities;
 using DevHabit.Api.Extensions;
+using DevHabit.Api.Middleware;
+using DevHabit.Api.Services;
+using DevHabit.Api.Services.Sorting;
+using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Newtonsoft.Json.Serialization;
 using Npgsql;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
@@ -14,8 +21,21 @@ builder.Services.AddControllers(options =>
 {
     options.ReturnHttpNotAcceptable = true;
 })
-.AddNewtonsoftJson()
+.AddNewtonsoftJson(options => options.SerializerSettings.ContractResolver =
+    new CamelCasePropertyNamesContractResolver())
 .AddXmlSerializerFormatters();
+
+builder.Services.AddValidatorsFromAssemblyContaining<Program>();
+
+builder.Services.AddProblemDetails(options =>
+{
+    options.CustomizeProblemDetails = context =>
+    {
+        context.ProblemDetails.Extensions.TryAdd("requestId", context.HttpContext.TraceIdentifier);
+    };
+});
+builder.Services.AddExceptionHandler<ValidationExceptionHandler>();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
 builder.Services.AddOpenApi();
 
@@ -45,6 +65,12 @@ builder.Logging.AddOpenTelemetry(options =>
     options.IncludeFormattedMessage = true;
 });
 
+builder.Services.AddTransient<SortMappingProvider>();
+builder.Services.AddSingleton<ISortMappingDefinition, SortMappingDefinition<HabitDto, Habit>>(_ =>
+    HabitMappings.SortMapping);
+
+builder.Services.AddTransient<DataShapingService>();
+
 WebApplication app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -55,6 +81,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseExceptionHandler();
 
 app.MapControllers();
 
